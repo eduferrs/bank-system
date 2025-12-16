@@ -1,3 +1,6 @@
+from datetime import datetime
+#datetime.now()
+
 clientes = []
 contas = []
 
@@ -10,10 +13,48 @@ menu = """
 [3] Depositar
 [4] Sacar
 [5] Extrato
+[6] Listar Contas
 [0] Sair
 
 => """
 
+class ContaIterador:
+    def __init__(self, contas):
+        self.contas = contas
+        self.contador = 0
+
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        try:
+            conta = self.contas[self.contador]
+
+            if not conta:
+                return
+
+            self.contador += 1
+            return conta        
+        except IndexError:
+            raise StopIteration
+
+def log_transacao(funcao):
+    def envelope(*args, **kwargs):
+        tipo_transacao = funcao.__name__
+        tipo_transacao = tipo_transacao.replace('_', ' ').title()
+        
+        resultado = funcao(*args, **kwargs)
+
+        if resultado:
+            print("\n=================== Log ===================")
+            print(f"Ação realizada às {datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")}")
+            print(f"Tipo: {tipo_transacao}")
+            print("===========================================")
+        return resultado
+    
+    return envelope
+
+@log_transacao
 def sacar(*, cpf, valor):
     contas_cliente = []
     numeros_contas = []
@@ -52,15 +93,19 @@ def sacar(*, cpf, valor):
                 print("Operação falhou! Número máximo de saques excedido.")
             else:
                 conta['saldo'] -= valor
-                conta['extrato'] += f"- Saque R$ {valor:.2f}\n"
+
+                registro_operacao = {
+                    'tipo': "saque",
+                    'log': f"- Saque: R$ {valor:.2f} - {datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")}"
+                }
+
+                conta['extrato'].append(registro_operacao)
                 conta['numero_saques'] += 1
+                print("\nOperação realizada com sucesso!")
+                print(f"Novo saldo: R$ {conta['saldo']:.2f}")
+    return 1
 
-                print("Operação realizada com sucesso!\n")
-                print(f"Novo saldo: {conta['saldo']}")
-                print(f"Extrato: ")
-                print(conta['extrato'])
-
-
+@log_transacao
 def depositar(cpf, valor, /):
     contas_cliente = []
     numeros_contas = []
@@ -87,21 +132,32 @@ def depositar(cpf, valor, /):
     for conta in contas_cliente:
         if conta_alvo == conta['nro']:
             conta['saldo'] += valor
-            conta['extrato'] += f"- Depósito R$ {valor:.2f}\n"
 
-            print("Operação realizada com sucesso!\n")
-            print(f"Novo saldo: {conta['saldo']}")
-            print(f"Extrato: ")
-            print(conta['extrato'])
+            registro_operacao = {
+                'tipo': "deposito",
+                'log': f"- Depósito: R$ {valor:.2f} - {datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")}"
+            }
+            conta['extrato'].append(registro_operacao)
 
+            print("\nOperação realizada com sucesso!")
+            print(f"Novo saldo: R$ {conta['saldo']:.2f}")
+    return 1
 
-def extrato(saldo, /, *, extrato):
-    print("\n================ EXTRATO ================")
-    print("Não foram realizadas movimentações." if not extrato else extrato)
-    print(f"\nSaldo: R$ {saldo:.2f}")
+@log_transacao
+def obter_extrato(saldo, /, *, extrato):
+    print("\n================ Histórico ================")
+
+    if not extrato:
+        print("Não foram realizadas movimentações.")
+    else: 
+        for operacao in extrato:
+            yield operacao
+
+    print(f"\nSaldo atual: R$ {saldo:.2f}")
     print("==========================================")
+    return 1
 
-
+@log_transacao
 def cadastrar_cliente(nome, data_nascimento, cpf, endereco):
     novo_cliente = {
         "nome": nome,
@@ -111,23 +167,24 @@ def cadastrar_cliente(nome, data_nascimento, cpf, endereco):
     }
 
     clientes.append(novo_cliente)
-    print('Cliente cadastrado com sucesso!')
+    return 1
 
-
-def criar_conta_corrente(agencia, nro_conta, cpf):
+@log_transacao
+def criar_conta_corrente(agencia, nro_conta, cpf, nome_titular):
     nova_conta = {
         "agencia": agencia,
         "nro": nro_conta,
+        "nome_titular": nome_titular,
         "cpf": cpf,
         "saldo": 0,
         "limite": 500,
         "numero_saques": 0,
         "limite_saques": 3,
-        "extrato": ''
+        "extrato": []
     }
     
     contas.append(nova_conta)
-    print('Conta criada com sucesso!')
+    return 1
     
 
 def definir_nascimento():
@@ -203,10 +260,46 @@ def consultar_cpf(cpf):
     
     for item in clientes:
         if item['cpf'] == cpf:
-            return True
+            return item['nome']
         
     return False
 
+
+def ler_valor():
+    while(1):
+        try:
+            valor = float(input("Informe o valor: "))
+            if valor > 0:
+                return valor
+            else:
+                print("O valor deve ser maior que zero.")
+        except ValueError:
+            print("Operação falhou! O valor informado é inválido! Digite apenas números e separe casa decimal com ponto (ex.: 1150.50)")
+
+
+def selecionar_conta(cpf):
+    contas_cliente = []
+    numeros_contas = []
+    for conta in contas:
+        if conta['cpf'] == cpf:
+            contas_cliente.append(conta)
+            numeros_contas.append(conta['nro'])
+    
+    while(1):
+        if numeros_contas:
+            print("Contas que o cliente possui: ", numeros_contas)
+            conta_alvo = input("Informe o nro da conta para a operação: ")
+            
+            if conta_alvo not in numeros_contas:
+                print('Opção inválida.')
+                continue
+            else:
+                for conta in contas_cliente:
+                    if conta['nro'] == conta_alvo:
+                        return conta
+        else:
+            print("Cliente ainda não possui uma conta cadastrada!")
+            return
 
 while True:
 
@@ -231,81 +324,83 @@ while True:
     elif opcao == '2':
         cpf = input("Informe o CPF do cliente: ")
 
-        if consultar_cpf(cpf) == False:
+        cliente = consultar_cpf(cpf)
+        if cliente == False:
             print("CPF inválido ou não cadastrado!")
             continue
 
-        criar_conta_corrente(NRO_AGENCIA, str(nro_conta), cpf)
+        criar_conta_corrente(NRO_AGENCIA, str(nro_conta), cpf, cliente)
         nro_conta += 1
     
     elif opcao == "3":
         cpf = input("Informe o CPF do cliente: ")
 
-        if consultar_cpf(cpf) == False:
+        cliente = consultar_cpf(cpf)
+        if cliente == False:
             print("CPF inválido ou não cadastrado!")
             continue
 
-        while(1):
-            try:
-                valor = float(input("Informe o valor do depósito: "))
-                if valor > 0:
-                    depositar(cpf, valor)
-                    break
-                else:
-                    print("O valor deve ser maior que zero.")
-            except ValueError:
-                print("Operação falhou! O valor informado é inválido! Digite apenas números e separe casa decimal com ponto (ex.: 1150.50)")
+        valor = ler_valor()
+        depositar(cpf, valor)
 
     elif opcao == "4":
         cpf = input("Informe o CPF do cliente: ")
 
-        if consultar_cpf(cpf) == False:
+        cliente = consultar_cpf(cpf)
+        if cliente == False:
             print("CPF inválido ou não cadastrado!")
             continue
 
-        while(1):
-            try:
-                valor = float(input("Informe o valor do saque: "))
-                if valor > 0:
-                    sacar(cpf = cpf, valor = valor)
-                    break
-                else:
-                    print("O valor deve ser maior que zero.")
-            except ValueError:
-                print("Operação falhou! O valor informado é inválido! Digite apenas números e separe casa decimal com ponto (ex.: 500.00)")
+        valor = ler_valor()
+        sacar(cpf = cpf, valor = valor)
 
     elif opcao == "5":
         cpf = input("Informe o CPF do cliente: ")
 
-        if consultar_cpf(cpf) == False:
+        cliente = consultar_cpf(cpf)
+        if cliente == False:
             print("CPF inválido ou não cadastrado!")
             continue
 
-        contas_cliente = []
-        numeros_contas = []
-        for conta in contas:
-            if conta['cpf'] == cpf:
-                contas_cliente.append(conta)
-                numeros_contas.append(conta['nro'])
-        
-        if numeros_contas:
-            print("Contas que o cliente possui: ", numeros_contas)
-            conta_alvo = input("Informe o nro da conta que deseja ver o extrato: ")
-        else:
-            print("Cliente ainda não possui uma conta cadastrada!")
+        conta = selecionar_conta(cpf)
+
+        if conta is None:
             continue
 
         while(1):
-            if conta_alvo not in numeros_contas:
-                print('Opção inválida. Contas que o cliente possui: ', numeros_contas)
-                conta_alvo = input("Informe o nro da conta que deseja ver o extrato: ")
-                continue
-            else:
-                break
+            try:
+                print("\nOpções: \n[1] - Ver Depósitos\n[2] - Ver Saques\n[3] - Todas")
+                opcao_escolhida = int(input("Informe o tipo de transação que deseja conferir: "))
+                if opcao_escolhida in [1, 2, 3]:
+                    break
+                else:
+                    print("Opção inválida!")
+            except ValueError:
+                print("Opção inválida!")
 
-        for conta in contas_cliente:
-            if conta_alvo == conta['nro']:
-                extrato(conta['saldo'], extrato = conta['extrato'])
+        for operacao in obter_extrato(conta['saldo'], extrato = conta['extrato']):
+            if opcao_escolhida == 1:
+                if operacao['tipo'] == 'deposito':
+                    print(operacao['log'])
+            elif opcao_escolhida == 2:
+                if operacao['tipo'] == 'saque':
+                    print(operacao['log'])
+            else:
+                print(operacao['log'])
+
+    elif opcao == "6":
+        if not contas:
+            print("---------------------------")
+            print("Nenhuma conta cadastrada...")
+            print("---------------------------")
+
+        for conta  in ContaIterador(contas):
+            print("--------------------------")
+            print(f"Titular: {conta['nome_titular']}")
+            print(f"AG: {conta['agencia']}")
+            print(f"C/C: {conta['nro']}")
+            print(f"Saldo: R$ {conta['saldo']:.2f}")
+            print("--------------------------")
 
     elif opcao == "0":
         break
